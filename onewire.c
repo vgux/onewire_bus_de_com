@@ -4,10 +4,21 @@
 
 struct ONEWIRE_Config {
 	GPIO_TypeDef*	port; // Port to use
-	uint16_t		pint; // Pin number to use
+	uint16_t		pin;  // Pin number to use
 };
 
-// ONEWIRE delays ref : https://www.maximintegrated.com/en/design/technical-documents/app-notes/1/126.html
+/******************************************************************************** 
+ * 
+ * Datasheets
+ *
+ * ONEWIRE delays ref : https://www.maximintegrated.com/en/design/technical-documents/app-notes/1/126.html
+ *
+ * DS18S20 ref : https://datasheets.maximintegrated.com/en/ds/DS18S20.pdf
+ *
+ * DS18B20 ref : https://datasheets.maximintegrated.com/en/ds/DS18B20.pdf
+ *
+********************************************************************************/
+
 
 // microseconds (µs) delay
 void delayUs (uint32_t useconds)
@@ -18,10 +29,10 @@ void delayUs (uint32_t useconds)
 
 uint8_t ONEWIRE_Reset(struct ONEWIRE_Config *config)
 {
-	HAL_GPIO_WritePin(config->port, config->pin, GPIO_PIN__RESET);
+	HAL_GPIO_WritePin(config->port, config->pin, GPIO_PIN_RESET);
 	delayUs(480);
 
-	HAL_GPIO_WritePin(config->port, config->pin, GPIO_PIN__SET);
+	HAL_GPIO_WritePin(config->port, config->pin, GPIO_PIN_SET);
 	delayUs(70);
 
 	// if Read == '0' => a slave answered
@@ -33,23 +44,23 @@ uint8_t ONEWIRE_Reset(struct ONEWIRE_Config *config)
 
 void ONEWIRE_WriteBit0(struct ONEWIRE_Config *config)
 {
-	HAL_GPIO_WritePin(config->port, config->pin, GPIO_PIN__RESET);
+	HAL_GPIO_WritePin(config->port, config->pin, GPIO_PIN_RESET);
 	delayUs(70);
 }
 
 void ONEWIRE_WriteBit1(struct ONEWIRE_Config *config)
 {
-	HAL_GPIO_WritePin(config->port, config->pin, GPIO_PIN__RESET);
+	HAL_GPIO_WritePin(config->port, config->pin, GPIO_PIN_RESET);
 	delayUs(6);
-	HAL_GPIO_WritePin(config->port, config->pin, GPIO_PIN__SET);
+	HAL_GPIO_WritePin(config->port, config->pin, GPIO_PIN_SET);
 	delayUs(64);
 }
 
 uint8_t ONEWIRE_ReadBit(struct ONEWIRE_Config *config)
 {
-	HAL_GPIO_WritePin(config->port, config->pin, GPIO_PIN__RESET);
+	HAL_GPIO_WritePin(config->port, config->pin, GPIO_PIN_RESET);
 	delayUs(6);
-	HAL_GPIO_WritePin(config->port, config->pin, GPIO_PIN__SET);
+	HAL_GPIO_WritePin(config->port, config->pin, GPIO_PIN_SET);
 	delayUs(9);
 
 	uint8_t read_bit = HAL_GPIO_ReadPin(config->port, config->pin);
@@ -94,13 +105,30 @@ uint8_t DS1820_GetTemp8Bits(struct ONEWIRE_Config *config)
 	ONEWIRE_WriteByte(config, SKIP_ROM);
 	ONEWIRE_WriteByte(config, READ_SCRATCHPAD);
 
-	// Reading DS1820's temp
-	return ONEWIRE_ReadByte(config);
+	// Reading DS1820's temp (Scratchpad's byte 0)
+	uint8_t ds12820_temp_8_bits = ONEWIRE_ReadByte(config);
+
+	return ds12820_temp_8_bits / 2; // temp has a 0.5°C res, we move it to a 1°C res
 }
 
 int16_t DS1820_GetTemp16Bits(struct ONEWIRE_Config *config)
 {
-	//ONEWIRE_Reset(config);
+	ONEWIRE_Reset(config);
+	ONEWIRE_WriteByte(config, SKIP_ROM);
+	ONEWIRE_WriteByte(config, CONVERT_T);
+
+	delayUs(10000); //delaying 10 ms = 10 000 µs
+
+	ONEWIRE_Reset(config);
+	ONEWIRE_WriteByte(config, SKIP_ROM);
+	ONEWIRE_WriteByte(config, READ_SCRATCHPAD);
+
+	// Reading DS1820's temp first part (Scratchpad's byte 0)
+	int16_t ds12820_temp_full_res = ONEWIRE_ReadByte(config);
+	// Reading DS1820's temp last part (Scratchpad's byte 1)
+	ds12820_temp_full_res += ONEWIRE_ReadByte(config) << 8;
+
+	return ds12820_temp_full_res; // Don't forget to convert it to the selected res
 }
 
 
@@ -118,18 +146,15 @@ int main (void)
 	config.port = /**/; //GPIOx
 	config.pin = /**/;	//GPIO_PIN_x
 
-	// Configure GPIO
-	// GPIOA-> ...
-
-	// Config 1-Wire GPIO
-	??? // Port clocking
-	GPIOx->MODER |= (1 << (2 * GPIO_PIN_x)); // Output
-	GPIOx->OTYPER |= (1 << GPIO_PIN_x); // Open Drain
-	GPIOx->PUPDR |= (1 << (2 * GPIO_PIN_x)); // Pull-up Enabled
+	// 1-Wire GPIO Config
+	//RCC Register // Port clocking
+	SET_BIT(GPIOx->MODER, (1 << (2 * GPIO_PIN_x)); 	// Output
+	SET_BIT(GPIOx->OTYPER, (1 << GPIO_PIN_x)); 		// Open Drain
+	SET_BIT(GPIOx->PUPDR, (1 << (2 * GPIO_PIN_x)); 	// Pull-up Enabled
 
 	// PA5 LED Config
-	GPIOA->MODER |= (1 << (2*GPIO_PIN_5)); // Output
-	GPIOA->ODR &= ~(1 << GPIO_PIN_5); // Setting LED OFF
+	SET_BIT(GPIOA->MODER, 1 << (2*GPIO_PIN_5)); 	// Output
+	CLEAR_BIT(GPIOA->ODR, 1 << GPIO_PIN_5); 		// Setting LED OFF
 
 	// Config liaison série ?
 
@@ -141,7 +166,7 @@ int main (void)
 
 	while(1) {
 		switch (current_step) {
-			case FIRST_STAGE:
+			case FIRST_PHASE:
 				// 1st step : Hello World => validate first 1-Wire bus implementation
 				
 				// Sets PA5 LED ON for 1 second if a device is on this 1-Wire Bus
@@ -153,15 +178,17 @@ int main (void)
 				HAL_Delay(1000);
 
 				break;
-			case SECOND_STAGE:
+			case SECOND_PHASE:
 				// 2nd step : Getting 8 bit temperature from DS1820 => validate communication w/ DS1820
-				uint8_t temp = DS1820_GetTemp8Bits(&config);
-				HAL_Delay(1000);
+				uint8_t temp_8_bits = DS1820_GetTemp8Bits(&config);
+				HAL_Delay(2000);
 
 				break;
-			case THIRD_STAGE:
-				// 3rd step : Getting temp after button press
+			case THIRD_PHASE:
+				// 3rd step : Getting temp full res after button press ?
 				// Mean of the temp every 10 seconds ?
+				int16_t temp_16_bits = DS1820_GetTemp16Bits(config);
+				HAL_Delay(2000);
 
 				break;
 			default:
@@ -171,4 +198,3 @@ int main (void)
 
 	return 0;
 }
-
