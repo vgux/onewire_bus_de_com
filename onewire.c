@@ -136,7 +136,7 @@ int16_t DS1820_GetTemp16Bits(struct ONEWIRE_Config *config)
 
 	// Reading DS1820's temp first part (Scratchpad's byte 0)
 	int16_t ds12820_temp_full_res = ONEWIRE_ReadByte(config);
-	
+
 	// Reading DS1820's temp last part (Scratchpad's byte 1)
 	ds12820_temp_full_res += ONEWIRE_ReadByte(config) << 8;
 
@@ -164,70 +164,66 @@ int main (void)
 
 	// 1-Wire GPIO Config
 	//RCC Register // Port clocking
-	SET_BIT(GPIOx->MODER, (1 << (2 * GPIO_PIN_x)); 	// Output
-	SET_BIT(GPIOx->OTYPER, (1 << GPIO_PIN_x)); 		// Open Drain
-	SET_BIT(GPIOx->PUPDR, (1 << (2 * GPIO_PIN_x)); 	// Pull-up Enabled
+	SET_BIT(GPIOA->MODER, (1 << (2 * x))); 	// Output
+	SET_BIT(GPIOA->OTYPER, (1 << x)); 		// Open Drain
+	SET_BIT(GPIOA->PUPDR, (1 << (2 * x))); 	// Pull-up Enabled
 
 	// PA5 LED Config
-	SET_BIT(GPIOA->MODER, 1 << (2*GPIO_PIN_5)); 	// Output
-	CLEAR_BIT(GPIOA->ODR, 1 << GPIO_PIN_5); 		// Setting LED OFF
+	SET_BIT(GPIOA->MODER, (1 << (2 * 5))); 	// Output
+	CLEAR_BIT(GPIOA->ODR, (1 << 5)); 		// Setting LED OFF
 
 	// UART Config ?
 
 	// Enable TIM1
 	__HAL_TIM_ENABLE(&htim1);
 
-	enum step_e {FIRST_PHASE = 0, SECOND_PHASE, THIRD_PHASE};
-	enum step_e current_step = FIRST_PHASE;
+// Valid values for next define : FIRST_PHASE, SECOND_PHASE, THIRD_PHASE
+#define FIRST_PHASE
 
 	while(1) {
-		switch (current_step) {
-			case FIRST_PHASE:
-				// 1st step : Hello World => validate first 1-Wire bus implementation
-				
-				// Sets PA5 LED ON for 1 second if a device is on this 1-Wire Bus
-				HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, ONEWIRE_Reset(&config));
 
-				// Polling device every 2 seconds
-				HAL_Delay(1000);
-				HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_RESET); // Resetting LED state
-				HAL_Delay(1000);
+#ifdef FIRST_PHASE
+		// 1st step : Hello World => validate first 1-Wire bus implementation
+			
+		// Sets PA5 LED ON for 1 second if a device is on this 1-Wire Bus
+		HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, ONEWIRE_Reset(&config));
 
-				break;
-			case SECOND_PHASE:
-				// 2nd step : Getting 8 bit temperature from DS1820 => validate communication w/ DS1820
-				// Print received temp on UART
+		// Polling device every 2 seconds
+		HAL_Delay(1000);
+		HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_RESET); // Resetting LED state
+		HAL_Delay(1000);
 
-				// Get DS1820's temperature (restricted to 8 bits)
-				uint8_t temp_8_bits = DS1820_GetTemp8Bits(&config); // unit : depends on resolution !
+#elif defined(SECOND_PHASE)
+		// 2nd step : Getting 8 bit temperature from DS1820 => validate communication w/ DS1820
+		// Print received temp on UART
 
-				// temp_8_bits has a 0.5°C res, we move it to a 1°C res
-				float current_temperature = convert_temperature_using_res(temp_8_bits, 0.5);
+		// Get DS1820's temperature (restricted to 8 bits)
+		uint8_t temp_8_bits = DS1820_GetTemp8Bits(&config); // unit : depends on resolution !
 
-				// Printing to UART
+		// temp_8_bits has a 0.5°C res, we move it to a 1°C res
+		float current_temperature = convert_temperature_using_res(temp_8_bits, 0.5);
 
-				HAL_Delay(2000);
+		// Printing to UART
 
-				break;
-			case THIRD_PHASE:
-				// 3rd step : Getting temp full res after button press ?
-				// Mean of the temp every 10 seconds ?
-				// Alarm Signaling ? (ref in datasheet)
+		HAL_Delay(2000);
 
-				// Get DS1820's temperature (full resolution)
-				int16_t temp_16_bits = DS1820_GetTemp16Bits(config); // unit : depends on resolution !
+#elif defined(THIRD_PHASE)
+		// 3rd step : Getting temp full res after button press ?
+		// Mean of the temp every 10 seconds ?
+		// Alarm Signaling ? (ref in datasheet)
 
-				// You need to convert temp_16_bits before printing it !
-				float current_temperature = convert_temperature_using_res(temp_16_bits, 0.5);
+		// Get DS1820's temperature (full resolution)
+		int16_t temp_16_bits = DS1820_GetTemp16Bits(config); // unit : depends on resolution !
 
-				// Printing to UART
+		// You need to convert temp_16_bits before printing it !
+		float current_temperature = convert_temperature_using_res(temp_16_bits, 0.5);
 
-				HAL_Delay(2000);
+		// Printing to UART
 
-				break;
-			default:
-				break;
-		}
+		HAL_Delay(2000);
+#else
+#error Please define a valid macro name for phase !
+#endif
 	}
 
 	return 0;
