@@ -1,17 +1,8 @@
-#define SKIP_ROM 			0xCC
-#define CONVERT_T			0x44
-#define READ_SCRATCHPAD		0xBE
-
-struct ONEWIRE_Config {
-	GPIO_TypeDef*	port; // Port to use
-	uint16_t		pin;  // Pin number to use
-};
-
 /******************************************************************************** 
  * 
  * Datasheets
  *
- * ONEWIRE delays ref : https://www.maximintegrated.com/en/design/technical-documents/app-notes/1/126.html
+ * 1-Wire delays ref : https://www.maximintegrated.com/en/design/technical-documents/app-notes/1/126.html
  *
  * DS18S20 ref : https://datasheets.maximintegrated.com/en/ds/DS18S20.pdf
  *
@@ -19,11 +10,24 @@ struct ONEWIRE_Config {
  *
 ********************************************************************************/
 
+// DS1820 1-Wire Commands
+#define SKIP_ROM 			0xCC
+#define CONVERT_T			0x44
+#define READ_SCRATCHPAD		0xBE
+
+// 1-Wire struct containing GPIO infos
+struct ONEWIRE_Config {
+	GPIO_TypeDef* port; // Port to use
+	uint16_t pin; // Pin number to use
+};
 
 // microseconds (µs) delay
 void delayUs (uint32_t useconds)
 {
+	// Resetting timer's counter
 	__HAL_TIM_SET_COUNTER(&htim1, 0);
+
+	// Works with an 1 MHz timer
 	while(useconds < __HAL_TIM_GET_COUNTER(&htim1));
 }
 
@@ -39,6 +43,11 @@ uint8_t ONEWIRE_Reset(struct ONEWIRE_Config *config)
 	uint8_t slave_answered = !HAL_GPIO_ReadPin(config->port, config->pin);
 
 	delayUs(410);
+
+	/* Return values :
+	 * 0 : no slave on the bus
+	 * 1 : at least a slave on the bus
+	 */
 	return slave_answered;
 }
 
@@ -52,6 +61,7 @@ void ONEWIRE_WriteBit1(struct ONEWIRE_Config *config)
 {
 	HAL_GPIO_WritePin(config->port, config->pin, GPIO_PIN_RESET);
 	delayUs(6);
+
 	HAL_GPIO_WritePin(config->port, config->pin, GPIO_PIN_SET);
 	delayUs(64);
 }
@@ -60,6 +70,7 @@ uint8_t ONEWIRE_ReadBit(struct ONEWIRE_Config *config)
 {
 	HAL_GPIO_WritePin(config->port, config->pin, GPIO_PIN_RESET);
 	delayUs(6);
+
 	HAL_GPIO_WritePin(config->port, config->pin, GPIO_PIN_SET);
 	delayUs(9);
 
@@ -108,7 +119,7 @@ uint8_t DS1820_GetTemp8Bits(struct ONEWIRE_Config *config)
 	// Reading DS1820's temp (Scratchpad's byte 0)
 	uint8_t ds12820_temp_8_bits = ONEWIRE_ReadByte(config);
 
-	return ds12820_temp_8_bits / 2; // temp has a 0.5°C res, we move it to a 1°C res
+	return ds12820_temp_8_bits;
 }
 
 int16_t DS1820_GetTemp16Bits(struct ONEWIRE_Config *config)
@@ -125,12 +136,17 @@ int16_t DS1820_GetTemp16Bits(struct ONEWIRE_Config *config)
 
 	// Reading DS1820's temp first part (Scratchpad's byte 0)
 	int16_t ds12820_temp_full_res = ONEWIRE_ReadByte(config);
+	
 	// Reading DS1820's temp last part (Scratchpad's byte 1)
 	ds12820_temp_full_res += ONEWIRE_ReadByte(config) << 8;
 
 	return ds12820_temp_full_res; // Don't forget to convert it to the selected res
 }
 
+float convert_temperature_using_res(int16_t temp_to_convert, float res)
+{
+	return temp_to_convert * res;
+}
 
 int main (void)
 {
@@ -156,13 +172,13 @@ int main (void)
 	SET_BIT(GPIOA->MODER, 1 << (2*GPIO_PIN_5)); 	// Output
 	CLEAR_BIT(GPIOA->ODR, 1 << GPIO_PIN_5); 		// Setting LED OFF
 
-	// Config liaison série ?
+	// UART Config ?
 
 	// Enable TIM1
 	__HAL_TIM_ENABLE(&htim1);
 
 	enum step_e {FIRST_PHASE = 0, SECOND_PHASE, THIRD_PHASE};
-	enum step_e current_step = FIRST_STAGE;
+	enum step_e current_step = FIRST_PHASE;
 
 	while(1) {
 		switch (current_step) {
@@ -174,20 +190,38 @@ int main (void)
 
 				// Polling device every 2 seconds
 				HAL_Delay(1000);
-				HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN__RESET);
+				HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_RESET); // Resetting LED state
 				HAL_Delay(1000);
 
 				break;
 			case SECOND_PHASE:
 				// 2nd step : Getting 8 bit temperature from DS1820 => validate communication w/ DS1820
-				uint8_t temp_8_bits = DS1820_GetTemp8Bits(&config);
+				// Print received temp on UART
+
+				// Get DS1820's temperature (restricted to 8 bits)
+				uint8_t temp_8_bits = DS1820_GetTemp8Bits(&config); // unit : depends on resolution !
+
+				// temp_8_bits has a 0.5°C res, we move it to a 1°C res
+				float current_temperature = convert_temperature_using_res(temp_8_bits, 0.5);
+
+				// Printing to UART
+
 				HAL_Delay(2000);
 
 				break;
 			case THIRD_PHASE:
 				// 3rd step : Getting temp full res after button press ?
 				// Mean of the temp every 10 seconds ?
-				int16_t temp_16_bits = DS1820_GetTemp16Bits(config);
+				// Alarm Signaling ? (ref in datasheet)
+
+				// Get DS1820's temperature (full resolution)
+				int16_t temp_16_bits = DS1820_GetTemp16Bits(config); // unit : depends on resolution !
+
+				// You need to convert temp_16_bits before printing it !
+				float current_temperature = convert_temperature_using_res(temp_16_bits, 0.5);
+
+				// Printing to UART
+
 				HAL_Delay(2000);
 
 				break;
